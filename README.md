@@ -83,7 +83,7 @@
 
 ```json
 {
-  "group_whitelist": ["484462343", "123456789"]
+  "group_whitelist": ["123456789"]
 }
 ```
 
