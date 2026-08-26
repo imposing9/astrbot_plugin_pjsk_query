@@ -59,7 +59,7 @@ def card_text(card: dict[str, Any], characters: dict[int, dict[str, Any]]) -> st
     return "\n".join((
         f"【{value(card, 'prefix', 'name')}】",
         f"ID：{value(card, 'id')}  稀有度：{rarity}  属性：{attribute}",
-        f"角色：{character_name}  发布时间：{value(card, 'releaseAt')}",
+        f"角色：{character_name}  发布时间：{format_timestamp(card.get('releaseAt'))}",
     ))
 
 

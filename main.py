@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.message_components import Image, Plain
+from astrbot.api.message_components import Image, Node, Nodes, Plain
 from astrbot.api.star import Context, Star
-from astrbot.core.star.filter.command import GreedyStr
 
 from .client import PJSKDataClient
 from .formatters import (
@@ -99,6 +99,11 @@ HELP_TEMPLATE = """<!DOCTYPE html>
 """
 
 
+def _command_pattern(*names: str) -> str:
+    """Build a regex that matches a command prefix without requiring '@'."""
+    return r"^\s*(?:" + "|".join(re.escape(name) for name in names) + r")(?:\s+.*)?$"
+
+
 class PJSKQueryPlugin(Star):
     """世界计划：缤纷舞台公开主数据查询。"""
 
@@ -106,6 +111,9 @@ class PJSKQueryPlugin(Star):
         super().__init__(context)
         self.config = config or {}
         self.limit = max(int(self.config.get("result_limit", 5)), 1)
+        self.group_whitelist = [
+            str(item) for item in (self.config.get("group_whitelist", []) or [])
+        ]
         self.client = PJSKDataClient(
             self.config.get(
                 "data_source",
@@ -116,6 +124,29 @@ class PJSKQueryPlugin(Star):
             int(self.config.get("cache_ttl", 1800)),
             self.config.get("event_tracker_url", "https://toolbox-api-direct.haruki.seiunx.com/event-tracker"),
         )
+
+    def _group_allowed(self, event: AstrMessageEvent) -> bool:
+        """Return False when the group is not in group_whitelist (if configured)."""
+        if not self.group_whitelist:
+            return True
+        group_id = event.get_group_id()
+        if group_id is None:
+            return True
+        return str(group_id) in self.group_whitelist
+
+    @staticmethod
+    def _extract_arg(event: AstrMessageEvent, *names: str) -> str | None:
+        """Extract the argument after a command prefix from a raw message.
+
+        Returns None if the message does not start with any of the given names.
+        """
+        text = event.message_str.strip()
+        for name in names:
+            if text == name:
+                return ""
+            if text.startswith(name + " "):
+                return text[len(name):].strip()
+        return None
 
     async def _table(self, name: str) -> list[dict[str, Any]]:
         try:
@@ -128,9 +159,11 @@ class PJSKQueryPlugin(Star):
                 "或检查插件的 data_source 配置。"
             ) from exc
 
-    @filter.command("pjsk帮助", alias={"pjskhelp", "世界计划帮助"})
+    @filter.regex(_command_pattern("pjsk帮助", "pjskhelp", "世界计划帮助"))
     async def help(self, event: AstrMessageEvent):
         """显示世界计划查询指令，渲染为图片卡片。"""
+        if not self._group_allowed(event):
+            return
         help_commands = [
             {"name": "查卡 <关键词>", "desc": "按卡牌名、ID、角色名/角色 ID 查询并返回卡图", "example": "查卡 初音"},
             {"name": "查角色 <关键词>", "desc": "按角色姓名、英文名或 ID 查询", "example": "查角色 初音未来"},
@@ -160,9 +193,12 @@ class PJSKQueryPlugin(Star):
                 logger.error("PJSK 帮助图片回退失败，发送纯文本: %s", exc2)
                 yield event.plain_result(HELP_TEXT)
 
-    @filter.command("查卡", alias={"pjsk查卡", "查卡牌"})
-    async def card(self, event: AstrMessageEvent, keyword: str):
+    @filter.regex(_command_pattern("查卡", "pjsk查卡", "查卡牌"))
+    async def card(self, event: AstrMessageEvent):
         """按卡牌名、卡牌 ID、角色 ID 或角色名查询卡牌。"""
+        if not self._group_allowed(event):
+            return
+        keyword = self._extract_arg(event, "查卡", "pjsk查卡", "查卡牌") or ""
         cards, chars = await self._table("cards"), await self._table("gameCharacters")
         character_map = {int(item["id"]): item for item in chars if item.get("id") is not None}
 
@@ -222,17 +258,39 @@ class PJSKQueryPlugin(Star):
             yield event.plain_result(f"没有找到与「{keyword}」相关的卡牌。")
             return
         region = str(self.config.get("region", "cn"))
-        chain: list = []
-        for item in matches:
-            chain.append(Plain(text=card_text(item, character_map)))
-            image_url = card_image_url(item, region)
-            if image_url:
-                chain.append(Image(file=image_url, url=image_url))
-        yield event.chain_result(chain)
+        if len(matches) > 1:
+            # 合并转发：每个卡牌作为一条 Node
+            self_id = event.get_self_id() or "10000"
+            self_name = "世划·PJSK查询"
+            nodes = []
+            for item in matches:
+                content: list = [Plain(text=card_text(item, character_map))]
+                image_url = card_image_url(item, region)
+                if image_url:
+                    content.append(Image(file=image_url, url=image_url))
+                nodes.append(
+                    Node(
+                        uin=int(self_id) if str(self_id).isdigit() else 10000,
+                        name=self_name,
+                        content=content,
+                    )
+                )
+            yield event.chain_result([Nodes(nodes=nodes)])
+        else:
+            chain: list = []
+            for item in matches:
+                chain.append(Plain(text=card_text(item, character_map)))
+                image_url = card_image_url(item, region)
+                if image_url:
+                    chain.append(Image(file=image_url, url=image_url))
+            yield event.chain_result(chain)
 
-    @filter.command("查角色", alias={"pjsk查角色"})
-    async def character(self, event: AstrMessageEvent, keyword: str):
+    @filter.regex(_command_pattern("查角色", "pjsk查角色"))
+    async def character(self, event: AstrMessageEvent):
         """按姓名或角色 ID 查询角色。"""
+        if not self._group_allowed(event):
+            return
+        keyword = self._extract_arg(event, "查角色", "pjsk查角色") or ""
         characters = await self._table("gameCharacters")
         matches = search(characters, keyword, "id", "firstName", "givenName", "name", limit=self.limit)
         if not matches:
@@ -244,16 +302,22 @@ class PJSKQueryPlugin(Star):
             lines.append(f"【{name or value(item, 'name')}】\nID：{value(item, 'id')}  单位：{value(item, 'unit')}  性别：{value(item, 'gender')}")
         yield event.plain_result("\n\n".join(lines))
 
-    @filter.command("查曲", alias={"pjsk查曲", "查歌"})
-    async def music(self, event: AstrMessageEvent, keyword: str):
+    @filter.regex(_command_pattern("查曲", "pjsk查曲", "查歌"))
+    async def music(self, event: AstrMessageEvent):
         """按歌名、歌曲 ID、作词、作曲或编曲查询歌曲。"""
+        if not self._group_allowed(event):
+            return
+        keyword = self._extract_arg(event, "查曲", "pjsk查曲", "查歌") or ""
         musics = await self._table("musics")
         matches = search(musics, keyword, "id", "title", "lyricist", "composer", "arranger", limit=self.limit)
         yield event.plain_result("\n\n".join(music_text(item) for item in matches) if matches else f"没有找到歌曲「{keyword}」。")
 
-    @filter.command("查谱面", alias={"pjsk查谱", "查谱"})
-    async def chart(self, event: AstrMessageEvent, keyword: str):
+    @filter.regex(_command_pattern("查谱面", "pjsk查谱", "查谱"))
+    async def chart(self, event: AstrMessageEvent):
         """按歌曲 ID 或歌名查询各难度谱面等级与物量。"""
+        if not self._group_allowed(event):
+            return
+        keyword = self._extract_arg(event, "查谱面", "pjsk查谱", "查谱") or ""
         musics, charts = await self._table("musics"), await self._table("musicDifficulties")
         matched_music = search(musics, keyword, "id", "title", limit=1)
         if not matched_music:
@@ -264,16 +328,21 @@ class PJSKQueryPlugin(Star):
         rows.sort(key=lambda item: ("easy", "normal", "hard", "expert", "master", "append").index(item.get("musicDifficulty")) if item.get("musicDifficulty") in {"easy", "normal", "hard", "expert", "master", "append"} else 99)
         yield event.plain_result(f"【{value(music, 'title')}】\n" + ("\n".join(chart_text(row) for row in rows) or "暂无谱面数据。"))
 
-    @filter.command("查活动", alias={"pjsk查活动"})
-    async def event(self, event: AstrMessageEvent, keyword: str):
+    @filter.regex(_command_pattern("查活动", "pjsk查活动"))
+    async def event(self, event: AstrMessageEvent):
         """按活动名或活动 ID 查询活动。"""
+        if not self._group_allowed(event):
+            return
+        keyword = self._extract_arg(event, "查活动", "pjsk查活动") or ""
         events = await self._table("events")
         matches = search(events, keyword, "id", "name", limit=self.limit)
         yield event.plain_result("\n\n".join(event_text(item) for item in matches) if matches else f"没有找到活动「{keyword}」。")
 
-    @filter.command("当前活动", alias={"pjsk当前活动"})
+    @filter.regex(_command_pattern("当前活动", "pjsk当前活动"))
     async def current_event(self, event: AstrMessageEvent):
         """查询主数据镜像中当前进行的活动。"""
+        if not self._group_allowed(event):
+            return
         import time
         now = int(time.time() * 1000)
         events = await self._table("events")
@@ -392,10 +461,12 @@ class PJSKQueryPlugin(Star):
             result.append(f"T{rank}：{int(line.get('score', 0)):,} pt（时速 {hourly}）")
         return "\n".join(result)
 
-    @filter.command("查榜线", alias={"当前榜线", "pjsk榜线", "sk线"})
-    async def rank_border(self, event: AstrMessageEvent, args: GreedyStr = GreedyStr):
+    @filter.regex(_command_pattern("查榜线", "当前榜线", "pjsk榜线", "sk线"))
+    async def rank_border(self, event: AstrMessageEvent):
         """查询当前活动榜线；可选档位与间隔，如：查榜线 1000 1h。"""
-        raw = "" if args is GreedyStr else str(args or "")
+        if not self._group_allowed(event):
+            return
+        raw = self._extract_arg(event, "查榜线", "当前榜线", "pjsk榜线", "sk线") or ""
         try:
             rank_text, interval = self._parse_rank_interval(raw.split())
         except ValueError as exc:
@@ -423,10 +494,12 @@ class PJSKQueryPlugin(Star):
 
         yield event.plain_result(self._format_rank_border(activity, overview, ranks, interval))
 
-    @filter.command("查活动榜线", alias={"活动榜线", "pjsk活动榜线"})
-    async def activity_rank_border(self, event: AstrMessageEvent, args: GreedyStr = GreedyStr):
+    @filter.regex(_command_pattern("查活动榜线", "活动榜线", "pjsk活动榜线"))
+    async def activity_rank_border(self, event: AstrMessageEvent):
         """查询指定活动的榜线；用法：查活动榜线 <活动ID或名称> [档位] [间隔]。"""
-        raw = "" if args is GreedyStr else str(args or "")
+        if not self._group_allowed(event):
+            return
+        raw = self._extract_arg(event, "查活动榜线", "活动榜线", "pjsk活动榜线") or ""
         event_keyword, rank_text, interval = self._split_event_border_args(raw)
         if event_keyword:
             activity = await self._find_activity(event_keyword)
@@ -455,8 +528,11 @@ class PJSKQueryPlugin(Star):
 
         yield event.plain_result(self._format_rank_border(activity, overview, ranks, interval))
 
-    @filter.command("随机曲", alias={"pjsk随机曲", "随机歌"})
-    async def random_music(self, event: AstrMessageEvent, keyword: str = ""):
+    @filter.regex(_command_pattern("随机曲", "pjsk随机曲", "随机歌"))
+    async def random_music(self, event: AstrMessageEvent):
         """随机抽取一首歌曲；可选关键词会筛选歌名与制作人员。"""
+        if not self._group_allowed(event):
+            return
+        keyword = self._extract_arg(event, "随机曲", "pjsk随机曲", "随机歌") or ""
         music = choose_music(await self._table("musics"), keyword)
         yield event.plain_result(music_text(music) if music else f"没有符合「{keyword}」的歌曲。")
