@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger
@@ -27,6 +29,8 @@ HELP_TEXT = (
     "查卡 <关键词>｜查角色 <关键词>｜查曲 <关键词>\n"
     "查谱面 <歌曲 ID 或关键词>｜查活动 <关键词>\n"
     "当前活动｜查榜线 [档位] [间隔]｜查活动榜线 <活动> [档位] [间隔]\n"
+    "查玩家 <玩家ID> [服务器]｜绑定玩家 <玩家ID> [服务器]\n"
+    "解除绑定 [服务器或序号]｜玩家状态 [序号或服务器]\n"
     "随机曲 [关键词]\n"
     "数据来自 Haruki Dev Team 公开主数据；默认查询简中服。"
 )
@@ -114,6 +118,8 @@ class PJSKQueryPlugin(Star):
         self.group_whitelist = [
             str(item) for item in (self.config.get("group_whitelist", []) or [])
         ]
+        self.bindings_path = Path(__file__).resolve().parent / "data" / "player_bindings.json"
+        self.player_bindings = self._load_bindings()
         self.client = PJSKDataClient(
             self.config.get(
                 "data_source",
@@ -123,6 +129,7 @@ class PJSKQueryPlugin(Star):
             int(self.config.get("request_timeout", 15)),
             int(self.config.get("cache_ttl", 1800)),
             self.config.get("event_tracker_url", "https://toolbox-api-direct.haruki.seiunx.com/event-tracker"),
+            self.config.get("sekai_api_url", "http://127.0.0.1:9999"),
         )
 
     def _group_allowed(self, event: AstrMessageEvent) -> bool:
@@ -147,6 +154,72 @@ class PJSKQueryPlugin(Star):
             if text.startswith(name + " "):
                 return text[len(name):].strip()
         return None
+
+    def _load_bindings(self) -> dict[str, list[dict[str, Any]]]:
+        try:
+            if self.bindings_path.exists():
+                data = json.loads(self.bindings_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
+        except Exception as exc:
+            logger.warning("PJSK 读取玩家绑定失败: %s", exc)
+        return {}
+
+    def _save_bindings(self) -> None:
+        try:
+            self.bindings_path.parent.mkdir(parents=True, exist_ok=True)
+            self.bindings_path.write_text(
+                json.dumps(self.player_bindings, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            logger.warning("PJSK 保存玩家绑定失败: %s", exc)
+
+    def _user_bindings(self, sender_id: Any) -> list[dict[str, Any]]:
+        key = str(sender_id)
+        return self.player_bindings.setdefault(key, [])
+
+    @staticmethod
+    def _profile_value(data: Any, *keys: str) -> Any:
+        if isinstance(data, dict):
+            for key in keys:
+                value = data.get(key)
+                if value not in (None, ""):
+                    return value
+            for value in data.values():
+                if isinstance(value, dict):
+                    for key in keys:
+                        inner = value.get(key)
+                        if inner not in (None, ""):
+                            return inner
+        return "-"
+
+    @staticmethod
+    def _format_player_profile(profile: dict[str, Any], player_id: str, server: str) -> str:
+        name = PJSKQueryPlugin._profile_value(
+            profile, "userName", "name", "nickname", "playerName", "userProfileName"
+        )
+        user_id = PJSKQueryPlugin._profile_value(profile, "userId", "user_id", "id")
+        rank = PJSKQueryPlugin._profile_value(
+            profile, "rank", "userRank", "playerRank", "currentRank"
+        )
+        level = PJSKQueryPlugin._profile_value(
+            profile, "level", "userLevel", "playerLevel"
+        )
+        profile_word = PJSKQueryPlugin._profile_value(
+            profile, "profileWord", "userProfileWord", "profile", "signature"
+        )
+        lines = [
+            f"【{name or '玩家'}】",
+            f"服务器：{server.upper()}  玩家ID：{user_id if user_id != '-' else player_id}",
+        ]
+        if rank != "-":
+            lines.append(f"排名：{rank}")
+        if level != "-":
+            lines.append(f"等级：{level}")
+        if profile_word != "-":
+            lines.append(f"签名：{profile_word}")
+        return "\n".join(lines)
 
     async def _table(self, name: str) -> list[dict[str, Any]]:
         try:
@@ -173,6 +246,10 @@ class PJSKQueryPlugin(Star):
             {"name": "当前活动", "desc": "查询当前正在进行的活动", "example": "当前活动"},
             {"name": "查榜线 [档位] [间隔]", "desc": "查询当前活动榜线，支持 15m/1h/6h/24h", "example": "查榜线 1000 1h"},
             {"name": "查活动榜线 <活动> [档位] [间隔]", "desc": "查询指定活动的榜线", "example": "查活动榜线 177 1000 1h"},
+            {"name": "查玩家 <玩家ID> [服务器]", "desc": "查询指定玩家资料", "example": "查玩家 123456 cn"},
+            {"name": "绑定玩家 <玩家ID> [服务器]", "desc": "绑定本 QQ 的玩家账号", "example": "绑定玩家 123456 cn"},
+            {"name": "解除绑定 [服务器或序号]", "desc": "解除已绑定的玩家", "example": "解除绑定 cn"},
+            {"name": "玩家状态 [序号或服务器]", "desc": "查看已绑定玩家的状态", "example": "玩家状态 1"},
             {"name": "随机曲 [关键词]", "desc": "随机抽取一首歌曲，可按关键词筛选", "example": "随机曲 初音"},
             {"name": "pjsk帮助", "desc": "显示本帮助图片", "example": "pjsk帮助"},
         ]
@@ -527,6 +604,132 @@ class PJSKQueryPlugin(Star):
             return
 
         yield event.plain_result(self._format_rank_border(activity, overview, ranks, interval))
+
+    @filter.regex(_command_pattern("查玩家", "pjsk查玩家"))
+    async def lookup_player(self, event: AstrMessageEvent):
+        """查玩家 <玩家ID> [服务器]：查询指定玩家的资料。"""
+        if not self._group_allowed(event):
+            return
+        raw = self._extract_arg(event, "查玩家", "pjsk查玩家") or ""
+        parts = raw.split()
+        if not parts:
+            yield event.plain_result("用法：查玩家 <玩家ID> [服务器]，例如：查玩家 123456 cn")
+            return
+        player_id = parts[0]
+        server = parts[1] if len(parts) > 1 else str(self.config.get("region", "cn"))
+        if not player_id.isdigit():
+            yield event.plain_result("玩家ID应为纯数字。")
+            return
+        try:
+            profile = await self.client.player_profile(player_id, server)
+        except Exception as exc:
+            logger.warning("PJSK 查询玩家失败: %s", exc)
+            yield event.plain_result(f"查询玩家失败：{exc}")
+            return
+        yield event.plain_result(self._format_player_profile(profile, player_id, server))
+
+    @filter.regex(_command_pattern("绑定玩家", "pjsk绑定玩家"))
+    async def bind_player(self, event: AstrMessageEvent):
+        """绑定玩家 <玩家ID> [服务器]：为本 QQ 保存一个玩家绑定。"""
+        if not self._group_allowed(event):
+            return
+        raw = self._extract_arg(event, "绑定玩家", "pjsk绑定玩家") or ""
+        parts = raw.split()
+        if not parts:
+            yield event.plain_result("用法：绑定玩家 <玩家ID> [服务器]，例如：绑定玩家 123456 cn")
+            return
+        player_id = parts[0]
+        server = parts[1] if len(parts) > 1 else str(self.config.get("region", "cn"))
+        server = server.lower() if server.lower() in {"cn", "jp", "en", "tw", "kr"} else "cn"
+        if not player_id.isdigit():
+            yield event.plain_result("玩家ID应为纯数字。")
+            return
+        bindings = self._user_bindings(event.get_sender_id())
+        if any(
+            str(item.get("player_id")) == player_id
+            and str(item.get("server")).lower() == server
+            for item in bindings
+        ):
+            yield event.plain_result(f"该玩家已绑定：{server.upper()} {player_id}")
+            return
+        bindings.append({"player_id": player_id, "server": server})
+        self._save_bindings()
+        yield event.plain_result(f"绑定成功：{server.upper()} 服务器，玩家ID {player_id}")
+
+    @filter.regex(_command_pattern("解除绑定", "解绑", "pjsk解除绑定"))
+    async def unbind_player(self, event: AstrMessageEvent):
+        """解除绑定 [服务器或序号]：删除本 QQ 的玩家绑定。"""
+        if not self._group_allowed(event):
+            return
+        raw = self._extract_arg(event, "解除绑定", "解绑", "pjsk解除绑定") or ""
+        bindings = self._user_bindings(event.get_sender_id())
+        if not bindings:
+            yield event.plain_result("你还没有绑定任何玩家。")
+            return
+        if raw.isdigit():
+            index = int(raw)
+            if index < 1 or index > len(bindings):
+                yield event.plain_result(f"序号无效，当前共有 {len(bindings)} 个绑定。")
+                return
+            removed = bindings.pop(index - 1)
+            self._save_bindings()
+            yield event.plain_result(
+                f"已解除绑定：{removed.get('server', '').upper()} {removed.get('player_id', '')}"
+            )
+            return
+        if raw:
+            server = raw.lower() if raw.lower() in {"cn", "jp", "en", "tw", "kr"} else raw.lower()
+            before = len(bindings)
+            bindings[:] = [item for item in bindings if str(item.get("server")).lower() != server]
+            removed_count = before - len(bindings)
+            if removed_count == 0:
+                yield event.plain_result(f"没有找到 {server.upper()} 服务器的绑定。")
+                return
+            self._save_bindings()
+            yield event.plain_result(f"已解除 {server.upper()} 服务器的 {removed_count} 个绑定。")
+            return
+        bindings.clear()
+        self._save_bindings()
+        yield event.plain_result("已解除全部玩家绑定。")
+
+    @filter.regex(_command_pattern("玩家状态", "我的玩家", "pjsk玩家状态"))
+    async def player_status(self, event: AstrMessageEvent):
+        """玩家状态 [序号或服务器]：显示已绑定玩家的资料。"""
+        if not self._group_allowed(event):
+            return
+        raw = self._extract_arg(event, "玩家状态", "我的玩家", "pjsk玩家状态") or ""
+        bindings = self._user_bindings(event.get_sender_id())
+        if not bindings:
+            yield event.plain_result("你还没有绑定任何玩家，请先使用：绑定玩家 <玩家ID> [服务器]")
+            return
+
+        if raw.isdigit():
+            index = int(raw)
+            if index < 1 or index > len(bindings):
+                yield event.plain_result(f"序号无效，当前共有 {len(bindings)} 个绑定。")
+                return
+            selected = [bindings[index - 1]]
+        elif raw:
+            server = raw.lower() if raw.lower() in {"cn", "jp", "en", "tw", "kr"} else raw.lower()
+            selected = [item for item in bindings if str(item.get("server")).lower() == server]
+            if not selected:
+                yield event.plain_result(f"没有找到 {server.upper()} 服务器的绑定。")
+                return
+        else:
+            selected = bindings
+
+        lines = []
+        for idx, item in enumerate(selected, 1):
+            player_id = str(item.get("player_id", ""))
+            server = str(item.get("server", "cn"))
+            try:
+                profile = await self.client.player_profile(player_id, server)
+                text = self._format_player_profile(profile, player_id, server)
+            except Exception as exc:
+                logger.warning("PJSK 玩家状态查询失败 (%s %s): %s", server, player_id, exc)
+                text = f"【{server.upper()} {player_id}】状态获取失败：{exc}"
+            lines.append(f"[{idx}] {text}")
+        yield event.plain_result("\n\n".join(lines))
 
     @filter.regex(_command_pattern("随机曲", "pjsk随机曲", "随机歌"))
     async def random_music(self, event: AstrMessageEvent):

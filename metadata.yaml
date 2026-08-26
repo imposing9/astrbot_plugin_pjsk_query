@@ -2,7 +2,7 @@ name: astrbot_plugin_pjsk_query
 display_name: 世界计划：缤纷舞台查询
 desc: 基于公开主数据的 Project SEKAI 卡牌、角色、歌曲、谱面与活动查询插件。
 short_desc: Project SEKAI 多功能游戏资料查询
-version: 0.1
+version: 0.2
 author: pjsk-community
 repo: https://github.com/imposing9/astrbot_plugin_pjsk_query
 

@@ -29,6 +29,7 @@ dist/
 build/
 *.egg-info/
 *.tgz
+*.exe
 
 # IDE / OS
 .idea/

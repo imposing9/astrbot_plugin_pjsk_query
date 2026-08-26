@@ -12,6 +12,7 @@ import aiohttp
 
 HARUKI_CDN = "https://sekai-master-cdn.haruki.seiunx.com"
 HARUKI_EVENT_TRACKER = "https://toolbox-api-direct.haruki.seiunx.com/event-tracker"
+HARUKI_SEKAI_API = "http://127.0.0.1:9999"
 HARUKI_REPOSITORIES = {
     "jp": "haruki-sekai-master",
     "en": "haruki-sekai-en-master",
@@ -31,9 +32,11 @@ class PJSKDataClient:
         timeout: int = 15,
         cache_ttl: int = 1800,
         event_tracker_url: str = HARUKI_EVENT_TRACKER,
+        sekai_api_url: str = HARUKI_SEKAI_API,
     ):
         self.cdn_url = (cdn_url or HARUKI_CDN).rstrip("/")
         self.event_tracker_url = (event_tracker_url or HARUKI_EVENT_TRACKER).rstrip("/")
+        self.sekai_api_url = (sekai_api_url or HARUKI_SEKAI_API).rstrip("/")
         self.region = region if region in HARUKI_REPOSITORIES else "cn"
         self.timeout = aiohttp.ClientTimeout(total=max(timeout, 1))
         self.cache_ttl = max(cache_ttl, 0)
@@ -106,6 +109,21 @@ class PJSKDataClient:
                 raise ValueError(f"数据表 {name} 的格式不是列表")
             self._cache[name] = (time.monotonic(), payload)
             return payload
+
+    async def player_profile(self, player_id: str, server: str = "cn") -> dict[str, Any]:
+        """Query a player profile through Haruki-Sekai-API."""
+        server = server.lower() if server.lower() in HARUKI_REPOSITORIES else "cn"
+        if not self.sekai_api_url:
+            raise ValueError("未配置 sekai_api_url")
+        url = f"{self.sekai_api_url}/api/{server}/{player_id}/profile"
+        headers = {"Accept": "application/json", "User-Agent": "astrbot-plugin-pjsk-query/1.0"}
+        async with aiohttp.ClientSession(timeout=self.timeout, headers=headers) as session:
+            async with session.get(url) as response:
+                response.raise_for_status()
+                payload = await response.json(content_type=None)
+        if not isinstance(payload, dict):
+            raise ValueError("Haruki 玩家资料接口返回了无效数据")
+        return payload
 
     async def event_overview(self, event_id: int, interval: int = 3600) -> dict[str, Any]:
         """Read the public overview used by Haruki Toolbox's rank-border page."""
