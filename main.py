@@ -118,6 +118,7 @@ class PJSKQueryPlugin(Star):
         self.group_whitelist = [
             str(item) for item in (self.config.get("group_whitelist", []) or [])
         ]
+        self.enable_player_commands = bool(self.config.get("enable_player_commands", False))
         self.bindings_path = Path(__file__).resolve().parent / "data" / "player_bindings.json"
         self.player_bindings = self._load_bindings()
         self.client = PJSKDataClient(
@@ -610,6 +611,9 @@ class PJSKQueryPlugin(Star):
         """查玩家 <玩家ID> [服务器]：查询指定玩家的资料。"""
         if not self._group_allowed(event):
             return
+        if not self.enable_player_commands:
+            yield event.plain_result("玩家功能未开启，请在插件配置中设置 enable_player_commands 为 true。")
+            return
         raw = self._extract_arg(event, "查玩家", "pjsk查玩家") or ""
         parts = raw.split()
         if not parts:
@@ -632,6 +636,9 @@ class PJSKQueryPlugin(Star):
     async def bind_player(self, event: AstrMessageEvent):
         """绑定玩家 <玩家ID> [服务器]：为本 QQ 保存一个玩家绑定。"""
         if not self._group_allowed(event):
+            return
+        if not self.enable_player_commands:
+            yield event.plain_result("玩家功能未开启，请在插件配置中设置 enable_player_commands 为 true。")
             return
         raw = self._extract_arg(event, "绑定玩家", "pjsk绑定玩家") or ""
         parts = raw.split()
@@ -660,6 +667,9 @@ class PJSKQueryPlugin(Star):
     async def unbind_player(self, event: AstrMessageEvent):
         """解除绑定 [服务器或序号]：删除本 QQ 的玩家绑定。"""
         if not self._group_allowed(event):
+            return
+        if not self.enable_player_commands:
+            yield event.plain_result("玩家功能未开启，请在插件配置中设置 enable_player_commands 为 true。")
             return
         raw = self._extract_arg(event, "解除绑定", "解绑", "pjsk解除绑定") or ""
         bindings = self._user_bindings(event.get_sender_id())
@@ -696,6 +706,9 @@ class PJSKQueryPlugin(Star):
     async def player_status(self, event: AstrMessageEvent):
         """玩家状态 [序号或服务器]：显示已绑定玩家的资料。"""
         if not self._group_allowed(event):
+            return
+        if not self.enable_player_commands:
+            yield event.plain_result("玩家功能未开启，请在插件配置中设置 enable_player_commands 为 true。")
             return
         raw = self._extract_arg(event, "玩家状态", "我的玩家", "pjsk玩家状态") or ""
         bindings = self._user_bindings(event.get_sender_id())

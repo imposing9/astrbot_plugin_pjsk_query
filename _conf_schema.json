@@ -34,6 +34,11 @@
     "description": "Haruki-Sekai-API 地址，默认本地 http://127.0.0.1:9999。",
     "default": "http://127.0.0.1:9999"
   },
+  "enable_player_commands": {
+    "type": "bool",
+    "description": "是否开启查玩家/绑定玩家/玩家状态等指令。默认关闭。",
+    "default": false
+  },
   "group_whitelist": {
     "type": "list",
     "description": "群白名单，填写允许使用本插件的 QQ 群号；留空表示所有群可用。",

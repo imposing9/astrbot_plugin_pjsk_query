@@ -76,6 +76,77 @@
 - `玩家状态` 不带参数时显示全部绑定，也可以按序号或服务器筛选。
 - 玩家查询依赖 Haruki-Sekai-API，默认地址为 `http://127.0.0.1:9999`。
 
+### Haruki-Sekai-API 玩家功能配置
+
+玩家查询指令默认**关闭**，需要额外部署 `Haruki-Sekai-API` 后才能使用。
+
+#### 1. 获取 API 程序
+
+从 Haruki-Sekai-API 仓库获取构建产物或自行编译：
+
+```text
+https://github.com/Team-Haruki/Haruki-Sekai-API
+```
+
+也可以使用你本地的 `haruki-sekai-api.exe`。
+
+#### 2. 创建配置文件
+
+参考仓库根目录的示例文件，复制为：
+
+```text
+haruki-sekai-configs.yaml
+```
+
+必须根据你要查询的服务器填写对应配置，例如：
+
+- `backend.port`：默认 `9999`
+- `servers.cn.api_url`：当前国服 API 地址
+- `servers.cn.require_cookies` / `account_dir`：需要能访问游戏服务器的账号/凭据
+- `servers.cn.aes_key_hex` / `aes_iv_hex`：国服加密参数
+- 其他服务器同理
+
+具体字段含义以仓库文档和 `haruki-sekai-configs.example.yaml` 注释为准。
+
+#### 3. 启动 API
+
+在 `haruki-sekai-configs.yaml` 同目录下运行：
+
+```bash
+haruki-sekai-api.exe
+```
+
+默认监听：
+
+```text
+http://127.0.0.1:9999
+```
+
+#### 4. 验证接口
+
+用浏览器或 curl 测试：
+
+```text
+http://127.0.0.1:9999/api/cn/123456/profile
+```
+
+能返回 JSON 即部署成功。
+
+#### 5. 开启插件玩家功能
+
+在插件配置中设置：
+
+```json
+{
+  "sekai_api_url": "http://127.0.0.1:9999",
+  "enable_player_commands": true
+}
+```
+
+然后重载插件或重启 AstrBot。
+
+> 如果你不需要玩家查询，保持 `enable_player_commands: false` 即可，其它功能不受影响。
+
 ### 常用别名
 
 - `查卡`：`pjsk查卡`、`查卡牌`
@@ -98,6 +169,7 @@
 | `cache_ttl` | 主数据内存缓存时间（秒） | `1800` |
 | `result_limit` | 模糊查询最多返回结果数 | `5` |
 | `sekai_api_url` | Haruki-Sekai-API 地址 | `http://127.0.0.1:9999` |
+| `enable_player_commands` | 是否启用查玩家/绑定玩家/玩家状态等指令 | `false` |
 | `group_whitelist` | 群白名单，填写允许使用的 QQ 群号；留空表示所有群可用 | `[]` |
 
 ### 群白名单示例
