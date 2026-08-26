@@ -1,37 +1,37 @@
 {
   "data_source": {
     "type": "string",
-    "description": "Haruki Dev Team 主数据 CDN 地址。默认是 Haruki CDN；也可填完整 raw.githubusercontent.com 仓库地址（如 https://raw.githubusercontent.com/Team-Haruki/haruki-sekai-sc-master/main），插件会自动识别。",
+    "description": "Haruki Dev Team 主数据 CDN 地址，默认是 Haruki CDN",
     "default": "https://sekai-master-cdn.haruki.seiunx.com"
   },
   "region": {
     "type": "string",
-    "description": "查询区服：cn（简中）、jp、en、tw 或 kr。默认 cn。",
+    "description": "查询区服：cn（简中）、jp、en、tw 或 kr。默认 cn",
     "default": "cn"
   },
   "event_tracker_url": {
     "type": "string",
-    "description": "Haruki 公开榜线服务地址。通常不需要修改。",
+    "description": "Haruki 公开榜线服务地址（通常不需要修改）",
     "default": "https://toolbox-api-direct.haruki.seiunx.com/event-tracker"
   },
   "request_timeout": {
     "type": "int",
-    "description": "请求公开数据源的超时时间（秒）。",
+    "description": "请求公开数据源的超时时间（秒）",
     "default": 15
   },
   "cache_ttl": {
     "type": "int",
-    "description": "主数据在内存中的缓存时间（秒）。",
+    "description": "主数据在内存中的缓存时间（秒）",
     "default": 1800
   },
   "result_limit": {
     "type": "int",
-    "description": "模糊查询最多返回的结果数。",
+    "description": "模糊查询最多返回的结果数",
     "default": 5
   },
   "sekai_api_url": {
     "type": "string",
-    "description": "Haruki-Sekai-API 地址，默认本地 http://127.0.0.1:9999。",
+    "description": "Haruki-Sekai-API 地址，默认为本地 http://127.0.0.1:9999",
     "default": "http://127.0.0.1:9999"
   },
   "enable_player_commands": {
